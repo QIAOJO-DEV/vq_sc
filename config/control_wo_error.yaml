@@ -1,0 +1,45 @@
+model:
+    target: py_lightning_code.modules.my_vitvqgan.ViTVQ
+    params:
+        image_key: image
+        image_size: 256
+        patch_size: 8
+        encoder:
+            dim: 768
+            depth: 12
+            heads: 12
+            mlp_dim: 3072
+        decoder:
+            dim: 768
+            depth: 12
+            heads: 12
+            mlp_dim: 3072
+        quantizer:
+            embed_dim: 32
+            n_embed: 8192
+            with_error: false
+            error_prob: 0.05
+        loss:
+            target: py_lightning_code.losses.vqperceptual.VQLPIPSWithDiscriminator
+            params:
+                loglaplace_weight: 0.0
+                loggaussian_weight: 0.5
+                perceptual_weight: 1.0
+                adversarial_weight: 0.01
+        learning_rate: 2e-4
+        epochs: 1000
+
+dataset:
+    target: py_lightning_code.dataloader.DataModuleFromConfig
+    params:
+        batch_size: 4
+        num_workers: 4
+        train:
+            target: py_lightning_code.dataloader.ImageFolder.ImageFileDataset
+            params:
+                root: /home/data/haoyi_project/vq_sc/data_set/DIV2K
+
+        validation:
+            target: py_lightning_code.dataloader.ImageFolder.ImageFileDataset
+            params:
+                root: /home/data/haoyi_project/vq_sc/data_set/kodak

@@ -1,0 +1,47 @@
+model:
+    target: py_lightning_code.modules.my_vitvqgan.ViTVQ
+    params:
+        image_key: image
+        image_size: 256
+        patch_size: 8
+        encoder:
+            dim: 768
+            depth: 12
+            heads: 12
+            mlp_dim: 3072
+        decoder:
+            dim: 768
+            depth: 12
+            heads: 12
+            mlp_dim: 3072
+        quantizer:
+            embed_dim: 32
+            n_embed: 8192
+            with_error: false
+            error_prob: 0.05
+        loss:
+            target: py_lightning_code.losses.vqperceptual.VQLPIPSWithDiscriminator
+            params:
+                loglaplace_weight: 0.0
+                loggaussian_weight: 1.0
+                perceptual_weight: 0.1
+                adversarial_weight: 0.1
+        learning_rate: 2e-4
+        epochs: 100
+
+dataset:
+    target: py_lightning_code.dataloader.DataModuleFromConfig
+    params:
+        batch_size: 4
+        num_workers: 4
+        train:
+            target: py_lightning_code.dataloader.imagenet.ImageNetTrain
+            params:
+                root: /home/data/haoyi_project/vq_sc/data_set/imagenet-1k-256x256
+                resolution: 256
+
+        validation:
+            target: py_lightning_code.dataloader.imagenet.ImageNetValidation
+            params:
+                root: /home/data/haoyi_project/vq_sc/data_set/imagenet-1k-256x256
+                resolution: 256
