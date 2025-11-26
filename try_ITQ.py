@@ -265,7 +265,7 @@ def reorder_codebook_by_index(codebook_tensor, ints_unique):
 # -----------------------
 if __name__ == "__main__":
         # -------------------- 1. 加载 VQ-VAE 码本 --------------------
-    ckpt_path = '/home/data/haoyi_project/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss-epoch=880.ckpt'
+    ckpt_path = '/home/data/haoyi_project/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss-epoch=1987.ckpt'
     config_path = '/home/data/haoyi_project/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss.yaml'
 
     config = get_config_from_file(config_path)
@@ -289,4 +289,4 @@ if __name__ == "__main__":
     a=calculate_matrix_distance(codebook_tensor, torch.from_numpy(bits01_unique))
     new_loss = calculate_matrix_distance(new_codebook, bits)
     print("重新分配后的汉明矩阵和欧式距离矩阵的距离:", new_loss.item())
-    torch.save(new_codebook, '/home/data/haoyi_project/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500_channel_loss-epoch=880_codebook_b.pt')
+    torch.save(new_codebook, '/home/data/haoyi_project/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500_channel_loss-epoch=1987_codebook_b.pt')

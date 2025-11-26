@@ -76,8 +76,8 @@ def evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, SNR_list, 
                 id_b = split_patch_b.tensor_to_patch(id_b)
 
                 # 物理信道模拟
-                id_t, _ = physical_layer.harq_transmit(id_t, mode="CC", ebno_db=SNR - 10*math.log10(4))
-                id_b, _ = physical_layer.harq_transmit(id_b, mode="CC", ebno_db=SNR - 10*math.log10(4))
+                id_t, _ = physical_layer.pass_channel(id_t, ebno_db=SNR - 10*math.log10(4))
+                id_b, _ = physical_layer.pass_channel(id_b, ebno_db=SNR - 10*math.log10(4))
 
                 # patch -> tensor -> bits -> tensor
                 id_t = split_patch_t.patch_to_tensor(id_t)
@@ -162,7 +162,7 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
                     patch = split_patch.tensor_to_patch(bits)
 
                     # 信道模拟
-                    patch, _ = physical_layer.harq_transmit(patch, mode="CC", ebno_db=SNR - 10*math.log10(4))
+                    patch, _ = physical_layer.pass_channel(patch, ebno_db=SNR - 10*math.log10(4))
 
                     # patch -> bits -> tensor
                     patch = split_patch.patch_to_tensor(patch)
@@ -194,16 +194,16 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
 # =====================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--SNR_list', type=list, default=[1,3,5,7,9,11,13,15])
+    parser.add_argument('--SNR_list', type=list, default=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
     parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--model_ckpts', type=list, default=['/home/data/haoyi_projects/vq_sc/checkpoints/cnn_w_error_0.01_top_500-epoch=2971.ckpt','/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_gradient_GAN_lpips-epoch=2971.ckpt'])
-    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_projects/vq_sc/config/control_cnn_w_error_0.01_top_500.yaml','/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error.yaml'])
-    parser.add_argument('--model_name', type=list, default=['VQ-reassign index-topk','VQ'])
-    parser.add_argument('--codebooks', type=list, default=['/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500-epoch=2971_codebook_b.pt',None])
-    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_projects/vq_sc/data_set/kodak')
+    parser.add_argument('--model_ckpts', type=list, default=['/home/data/haoyi_project/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss-epoch=1987.ckpt','/home/data/haoyi_project/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss-epoch=1987.ckpt'])
+    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_project/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss.yaml','/home/data/haoyi_project/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss.yaml'])
+    parser.add_argument('--model_name', type=list, default=['VQ-reassign_c_t','VQ_c_t'])
+    parser.add_argument('--codebooks', type=list, default=['/home/data/haoyi_project/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500_channel_loss-epoch=1987_codebook_b.pt',None])
+    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_project/vq_sc/data_set/kodak')
     parser.add_argument('--bpg_quality', type=int, default=30)
     args = parser.parse_args()
-    save_dir = "/home/data/haoyi_projects/vq_sc/img_save/vq and vq_topk_reassign"
+    save_dir = "/home/data/haoyi_project/vq_sc/img_save"
     os.makedirs(save_dir, exist_ok=True)
 
     device = torch.device('cpu')
