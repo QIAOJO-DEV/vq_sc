@@ -9,7 +9,7 @@ from torchvision import transforms as T
 import pytorch_lightning as pl
 
 from .layers import Cnn_Encoder as Encoder, Cnn_Decoder as Decoder
-from .quantizers import VectorQuantizer, GumbelQuantizer ,EMAQuantizer
+from .quantizers import VectorQuantizer ,EMAQuantizer
 from py_lightning_code.utils.general import initialize_from_config
 class VQVAE(nn.Module):
     def __init__(
@@ -21,20 +21,21 @@ class VQVAE(nn.Module):
         embed_dim=64,
         n_embed=512,
         decay=0.99,
-        with_error=False,
+        error_strategy="none",
         error_prob=0.05,
+        top_k=500,
     ):
         super().__init__()
 
         self.enc_b = Encoder(in_channel, channel, n_res_block, n_res_channel, stride=4)
         self.enc_t = Encoder(channel, channel, n_res_block, n_res_channel, stride=2)
         self.quantize_conv_t = nn.Conv2d(channel, embed_dim, 1)
-        self.quantize_t = EMAQuantizer(embed_dim, n_embed, with_error=with_error, error_prob=error_prob,decay=decay)
+        self.quantize_t = EMAQuantizer(embed_dim, n_embed, error_strategy='none', error_prob=error_prob,decay=decay)
         self.dec_t = Decoder(
             embed_dim, embed_dim, channel, n_res_block, n_res_channel, stride=2
         )
         self.quantize_conv_b = nn.Conv2d(embed_dim + channel, embed_dim, 1)
-        self.quantize_b = EMAQuantizer(embed_dim, n_embed, with_error=with_error, error_prob=error_prob,decay=decay)
+        self.quantize_b = EMAQuantizer(embed_dim, n_embed, error_strategy='none', error_prob=error_prob,decay=decay)
         self.upsample_t = nn.ConvTranspose2d(
             embed_dim, embed_dim, 4, stride=2, padding=1
         )

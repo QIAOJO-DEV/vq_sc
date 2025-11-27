@@ -9,7 +9,7 @@ from torchvision import transforms as T
 import pytorch_lightning as pl
 
 from .layers import Cnn_Encoder as Encoder, Cnn_Decoder as Decoder
-from .quantizers import VectorQuantizer, GumbelQuantizer ,EMAQuantizer
+from .quantizers import VectorQuantizer ,EMAQuantizer
 from py_lightning_code.utils.general import initialize_from_config
 class VQVAE(nn.Module):
     def __init__(

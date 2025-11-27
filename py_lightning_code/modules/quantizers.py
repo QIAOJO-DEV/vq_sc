@@ -35,7 +35,11 @@ class BaseQuantizer(nn.Module):
         
     def quantize(self, z: torch.FloatTensor) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:
         pass
-    
+    def quantize_with_error(self, z: torch.FloatTensor) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:
+        # 重塑输入并归一化
+        pass
+    def quantize_to_top_k(self, z: torch.FloatTensor, top_k: int) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:
+        pass
     def forward(self, z: torch.FloatTensor) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:#Residual_VQ暂不启用
         if not self.use_residual:
             if self.error_strategy=="top_k":
@@ -191,19 +195,6 @@ class VectorQuantizer(BaseQuantizer):
     def embed_code(self, embed_id):
         return F.embedding(embed_id, self.embedding.weight)
 
-        
-
-
-
-class GumbelQuantizer(BaseQuantizer):
-    def __init__(self, embed_dim: int, n_embed: int, temp_init: float = 1.0,
-                 use_norm: bool = True, use_residual: bool = False, num_quantizers: Optional[int] = None, **kwargs) -> None:
-        super().__init__(embed_dim, n_embed, False,
-                         use_norm, use_residual, num_quantizers)
-        
-        self.temperature = temp_init
-        
-    def quantize(self, z: torch.FloatTensor, temp: Optional[float] = None) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:
         # force hard = True when we are in eval mode, as we must quantize
         hard = not self.training
         temp = self.temperature if temp is None else temp
@@ -228,13 +219,13 @@ class GumbelQuantizer(BaseQuantizer):
         
         return z_qnorm, loss, encoding_indices
 class EMAQuantizer(BaseQuantizer):
-    def __init__(self, embed_dim: int, n_embed: int, with_error: bool=False, error_prob:float=0.05,beta: float = 0.25, use_norm: bool = False,
+    def __init__(self, embed_dim: int, n_embed: int, error_strategy: str='none', error_prob:float=0.05,top_k:int=500,beta: float = 0.25, use_norm: bool = False,
                  use_residual: bool = False, num_quantizers: Optional[int] = None, decay=0.99,eps=1e-5,**kwargs) -> None:
         super().__init__(embed_dim, n_embed, True,  # 使用straight_through
                          use_norm, use_residual, num_quantizers)
         
         self.beta = beta
-        self.with_error = with_error
+        self.error_strategy=error_strategy
         self.error_prob = error_prob
         self.decay = decay
         self.eps = eps
@@ -295,121 +286,6 @@ class EMAQuantizer(BaseQuantizer):
         
         return z_qnorm, loss, encoding_indices_reshaped
         
-    def quantize_with_error(self, z: torch.FloatTensor) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:
-        # 重塑输入并归一化
-        z_reshaped = z.contiguous().view(-1, self.embed_dim)
-        z_reshaped_norm = self.norm(z_reshaped)
-        
-        # 选择要使用的嵌入向量
-        embedding_weights = self.embedding.weight
-        
-        embedding_norm = self.norm(embedding_weights)
-        
-        # 计算距离并获取最近的码本索引
-        d = torch.sum(z_reshaped_norm ** 2, dim=1, keepdim=True) + \
-            torch.sum(embedding_norm ** 2, dim=1) - 2 * \
-            torch.einsum('b d, n d -> b n', z_reshaped_norm, embedding_norm)
-        
-        encoding_indices = torch.argmin(d, dim=1).unsqueeze(1)
-        encoding_indices_reshaped = encoding_indices.view(*z.shape[:-1])
-        
-        # 引入比特错误
-        split = split2bitstream(int(math.log2(self.n_embed)), encoding_indices_reshaped.shape, encoding_indices_reshaped.dtype)
-        encoding_indices_bits = split.tensor_to_bits(encoding_indices_reshaped)
-        flip_mask = torch.rand_like(encoding_indices_bits.float()) < self.error_prob
-        encoding_indices_bits = encoding_indices_bits ^ flip_mask.to(encoding_indices_bits.dtype)
-        encoding_indices_with_error = split.bits_to_tensor(encoding_indices_bits)
-        
-        # 获取带有错误的量化向量
-        z_q = self.embedding(encoding_indices_with_error).view(z.shape)
-        z_qnorm, z_norm = self.norm(z_q), self.norm(z)
-        
-        # 在训练模式下，更新EMA（使用原始索引而非带错误的索引）,迫使模型学习在有错误下该如何输出特征
-        if self.training:
-            # 计算损失
-            loss =  torch.mean((z_qnorm.detach() - z_norm)**2) 
-            
-            # 计算EMA更新
-            with torch.no_grad():
-                # 创建one-hot编码（使用原始索引）
-                encodings = torch.zeros(encoding_indices.shape[0], self.n_embed, device=z.device)
-                encodings.scatter_(1, encoding_indices, 1)
-                
-                # 更新聚类大小
-                self.cluster_size.data.mul_(self.decay).add_(torch.sum(encodings, dim=0), alpha=1 - self.decay)
-                
-                # 计算输入向量的平均值
-                dw = torch.matmul(encodings.t(), z_reshaped)
-                
-                # 更新嵌入向量的平均值
-                self.embed_avg.data.mul_(self.decay).add_(dw, alpha=1 - self.decay)
-                
-                # 归一化嵌入向量
-                n = self.cluster_size.sum()
-                cluster_size = (self.cluster_size + self.eps) / (n + self.n_embed * self.eps) * n
-                embed_normalized = self.embed_avg / cluster_size.unsqueeze(1)
-                self.embedding.weight.data.copy_(embed_normalized)
-        else:
-            # 推理时不计算损失
-            loss = torch.tensor(0.0, device=z.device)
-        
-        return z_qnorm, loss, encoding_indices_with_error
     def embed_code(self, embed_id):
         return F.embedding(embed_id, self.embedding.weight)
-class EMAQuantizer_2(nn.Module):
-    def __init__(self, dim, n_embed, decay=0.99, eps=1e-5,with_error=False,error_prob=0.05):
-        super().__init__()
-
-        self.dim = dim
-        self.n_embed = n_embed
-        self.decay = decay
-        self.eps = eps
-        embed = torch.randn(dim, n_embed)#64,512
-        self.register_buffer("embed", embed)
-        self.register_buffer("cluster_size", torch.zeros(n_embed))
-        self.register_buffer("embed_avg", embed.clone())
-    def quantize(self,input):
-        flatten = input.reshape(-1, self.dim)
-        dist = (
-            flatten.pow(2).sum(1, keepdim=True)
-            - 2 * flatten @ self.embed
-            + self.embed.pow(2).sum(0, keepdim=True)
-        )
-        _, embed_ind = (-dist).max(1)
-        '''print(embed_ind)
-        print(embed_ind.shape)
-        print(embed_ind.dtype)'''
-        embed_onehot = F.one_hot(embed_ind, self.n_embed).type(flatten.dtype)
-        embed_ind = embed_ind.view(*input.shape[:-1])
-        '''print(embed_ind)
-        print(embed_ind.shape)
-        print(embed_ind.dtype)'''
-        quantize = self.embed_code(embed_ind)
-
-        if self.training:
-            embed_onehot_sum = embed_onehot.sum(0)
-            embed_sum = flatten.transpose(0, 1) @ embed_onehot
-
-            dist_fn.all_reduce(embed_onehot_sum)
-            dist_fn.all_reduce(embed_sum)
-
-            self.cluster_size.data.mul_(self.decay).add_(
-                embed_onehot_sum, alpha=1 - self.decay
-            )
-            self.embed_avg.data.mul_(self.decay).add_(embed_sum, alpha=1 - self.decay)
-            n = self.cluster_size.sum()
-            cluster_size = (
-                (self.cluster_size + self.eps) / (n + self.n_embed * self.eps) * n
-            )
-            embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
-            self.embed.data.copy_(embed_normalized)
-
-        diff = (quantize.detach() - input).pow(2).mean()
-        quantize = input + (quantize - input).detach()
-
-        return quantize, diff, embed_ind
-    def embed_code(self, embed_id):
-        return F.embedding(embed_id, self.embed.transpose(0, 1))
-    def forward(self, input):
-        return self.quantize(input)
     

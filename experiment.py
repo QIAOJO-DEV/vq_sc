@@ -44,7 +44,8 @@ def load_model_from_ckpt(ckpt_path, config_path, device, codebook_path=None):
     vqvae.eval()
     if codebook_path is not None:
         new_codebook = torch.load(codebook_path)
-        vqvae.model.quantize_b.embedding.weight = torch.nn.Parameter(new_codebook.to(device))
+        vqvae.model.quantize_b.embedding.weight = torch.nn.Parameter(new_codebook["codebook_b"].to(device))
+        vqvae.model.quantize_t.embedding.weight = torch.nn.Parameter(new_codebook["codebook_t"].to(device))
         print(f"Replaced codebook for {ckpt_path}")
     bits_per_index = int(math.log2(config.model.params.model_param.n_embed))
     return vqvae, bits_per_index
@@ -196,14 +197,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--SNR_list', type=list, default=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
     parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--model_ckpts', type=list, default=['/home/data/haoyi_project/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss-epoch=1987.ckpt','/home/data/haoyi_project/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss-epoch=1987.ckpt'])
-    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_project/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss.yaml','/home/data/haoyi_project/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss.yaml'])
-    parser.add_argument('--model_name', type=list, default=['VQ-reassign_c_t','VQ_c_t'])
-    parser.add_argument('--codebooks', type=list, default=['/home/data/haoyi_project/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500_channel_loss-epoch=1987_codebook_b.pt',None])
-    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_project/vq_sc/data_set/kodak')
+    parser.add_argument('--model_ckpts', type=list, default=['/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt','/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt'])
+    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml','/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml'])
+    parser.add_argument('--model_name', type=list, default=['VQ-reassign index','VQ'])
+    parser.add_argument('--codebooks', type=list, default=['/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.pt',None])
+    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_projects/vq_sc/data_set/kodak')
     parser.add_argument('--bpg_quality', type=int, default=30)
     args = parser.parse_args()
-    save_dir = "/home/data/haoyi_project/vq_sc/img_save"
+    save_dir = "/home/data/haoyi_projects/vq_sc/img_save"
     os.makedirs(save_dir, exist_ok=True)
 
     device = torch.device('cpu')
@@ -217,28 +218,15 @@ if __name__ == "__main__":
     # 循环多个 checkpoint
     # =====================
     all_results = {}
-    print("Processing BPG baseline...")
-    all_results["BPG"] = evaluate_bpg(dataloader, physical_layer, args.SNR_list, perceptual_loss, device, quality=args.bpg_quality)
     for idx, (ckpt, cfg, model_name) in enumerate(zip(args.model_ckpts, args.config_files, args.model_name)):
         print(f"Processing model {idx}: {ckpt}")
         codebook = args.codebooks[idx] if args.codebooks is not None else None
         vqvae, bits_per_index = load_model_from_ckpt(ckpt, cfg, device, codebook)
         results = evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, args.SNR_list, device, perceptual_loss)
         all_results[f"{model_name}"] = results
+    print("Processing BPG baseline...")
+    all_results["BPG"] = evaluate_bpg(dataloader, physical_layer, args.SNR_list, perceptual_loss, device, quality=args.bpg_quality)
 
-    # =====================
-    # BPG 基线
-    # =====================
-
-    # =====================
-    # 保存结果
-    # =====================
-    with open("all_results.pkl", "wb") as f:
-        pickle.dump(all_results, f)
-
-    # =====================
-    # 绘图（每个指标一张图）
-    # =====================
     metrics = ['PSNR', 'SSIM', 'LPIPS']
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 

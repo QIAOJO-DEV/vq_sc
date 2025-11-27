@@ -7,6 +7,8 @@ import torch
 from torchvision import transforms
 from PIL import Image
 import lpips
+import math
+import argparse
 from py_lightning_code.modules.CNNVQGAN import VQVAE
 from py_lightning_code.utils.general import get_config_from_file, initialize_from_config, setup_callbacks
 
@@ -259,26 +261,11 @@ def reorder_codebook_by_index(codebook_tensor, ints_unique):
     new_codebook[ints_tensor] = codebook_tensor
 
     return new_codebook
-
-# -----------------------
-# Example usage
-# -----------------------
-if __name__ == "__main__":
-        # -------------------- 1. 加载 VQ-VAE 码本 --------------------
-    ckpt_path = '/home/data/haoyi_project/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss-epoch=1987.ckpt'
-    config_path = '/home/data/haoyi_project/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss.yaml'
-
-    config = get_config_from_file(config_path)
-    vqvae = initialize_from_config(config.model)
-    ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
-    vqvae.load_state_dict(ckpt['state_dict'])
-    vqvae.eval()
-    codebook_tensor = vqvae.model.quantize_b.embedding.weight.detach()  # (8192, 64)
+def reassign_index(codebook_tensor):
     n_codes = codebook_tensor.shape[0]
-    n_bits = 10
-    indices = torch.arange(n_codes, dtype=torch.int32).unsqueeze(1)  # (8192,1)
-    bits = ((indices >> torch.arange(n_bits)) & 1).to(torch.uint8)   # (8192, 13)
-
+    n_bits = int(math.log2(n_codes))
+    indices = torch.arange(n_codes, dtype=torch.int32).unsqueeze(1)
+    bits = ((indices >> torch.arange(n_bits)) & 1).to(torch.uint8)
     initial_loss = calculate_matrix_distance(codebook_tensor, bits)
     print("初始汉明矩阵和欧式距离矩阵的距离:", initial_loss.item())
     X_np = codebook_tensor.numpy()
@@ -286,7 +273,34 @@ if __name__ == "__main__":
         X_np, m=n_bits, n_iter=20, max_radius=2, verbose=True
     )
     new_codebook = reorder_codebook_by_index(codebook_tensor, ints_unique)
-    a=calculate_matrix_distance(codebook_tensor, torch.from_numpy(bits01_unique))
     new_loss = calculate_matrix_distance(new_codebook, bits)
     print("重新分配后的汉明矩阵和欧式距离矩阵的距离:", new_loss.item())
-    torch.save(new_codebook, '/home/data/haoyi_project/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500_channel_loss-epoch=1987_codebook_b.pt')
+    return new_codebook
+
+
+# -----------------------
+# Example usage
+# -----------------------
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ckpt_path', type=str, default='/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt')
+    parser.add_argument('--config_path', type=str, default='/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml')
+    parser.add_argument('--save_path', type=str, default='/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.pt')
+    args = parser.parse_args()
+    ckpt_path = args.ckpt_path
+    config_path = args.config_path
+    save_path = args.save_path
+    config = get_config_from_file(config_path)
+    vqvae = initialize_from_config(config.model)
+    ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
+    vqvae.load_state_dict(ckpt['state_dict'])
+    vqvae.eval()
+    codebook_tensor_b = vqvae.model.quantize_b.embedding.weight.detach()  # (8192, 64)
+    codebook_tensor_t = vqvae.model.quantize_t.embedding.weight.detach()  # (8192, 64)
+    new_codebook_b = reassign_index(codebook_tensor_b)
+    new_codebook_t = reassign_index(codebook_tensor_t)
+    codebooks = {
+    "codebook_b": new_codebook_b,
+    "codebook_t": new_codebook_t
+     }
+    torch.save(codebooks, save_path)
