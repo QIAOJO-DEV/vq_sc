@@ -80,7 +80,26 @@ class VQVAE(nn.Module):
         quant_t, quant_b, diff, _, _ = self.encode(input)
         dec = self.decode(quant_t, quant_b)
 
+
         return dec, diff
+    def encode_analog(self, x):
+        enc_b = self.enc_b(x)              
+        enc_t = self.enc_t(enc_b)          
+
+        quant_t = self.quantize_conv_t(enc_t)  
+        dec_t = self.dec_t(quant_t) 
+
+        enc_b_cat = torch.cat([dec_t, enc_b], dim=1)
+
+        quant_b = self.quantize_conv_b(enc_b_cat)
+
+        return quant_t, quant_b
+    def decode_analog(self,quant_t, quant_b):
+        upsample_t = self.upsample_t(quant_t)
+        quant = torch.cat([upsample_t, quant_b], 1)
+        dec = self.dec(quant)
+        return dec
+
 class CNNVQGAN(pl.LightningModule):
     def __init__(self, image_key: str, image_size: int, model_param: OmegaConf, 
                  loss: OmegaConf, learning_rate:float=1e-4,epochs:int=500,path: Optional[str] = None) -> None:

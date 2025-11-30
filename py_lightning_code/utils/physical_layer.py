@@ -25,7 +25,7 @@ class PhysicalLayer:
     物理层传输
 
     """
-    def __init__(self, num_bits_per_symbol,modulation_type="qam",fec_type="LDPC",crc_type="CRC24A",channel_type="AWGN"):
+    def __init__(self, num_bits_per_symbol,modulation_type="qam",fec_type="LDPC",crc_type="CRC24A",channel_type="awgn"):
         k=64
         n=128
         self.fec=Choose_FEC(fec_type,k,n)
@@ -33,10 +33,10 @@ class PhysicalLayer:
         self.modulation=Modulation(modulation_type,num_bits_per_symbol)
         self.crc_encoder=sionna.phy.fec.crc.CRCEncoder(crc_degree=crc_type)
         self.crc_decoder=sionna.phy.fec.crc.CRCDecoder(crc_encoder=self.crc_encoder)
-        if channel_type=="AWGN":
+        if channel_type=="awgn":
             self.channel=sionna.phy.channel.AWGN()
             self.channel_type=channel_type
-        elif channel_type=="Rayleigh":
+        elif channel_type=="rayleigh":
             self.channel=sionna.phy.channel.AWGN()
             self.rayleigh = RayleighBlockFading(num_rx=1, num_rx_ant=1, num_tx=1, num_tx_ant=1)
             self.channel_type=channel_type
@@ -53,16 +53,16 @@ class PhysicalLayer:
         bitstream, pad_code = self.fec.ldpc_encoder(bitstream)
         modulated_symbols,pad_mod = self.modulation.modulation(bitstream)
         my_channel = self.channel
-        if self.channel_type=="AWGN":
+        if self.channel_type=="awgn":
             no = sionna.phy.utils.ebnodb2no(ebno_db, self.num_bits_per_symbol, coderate=1)
             modulated_symbols=my_channel(modulated_symbols,no)
-        elif self.channel_type=="Rayleigh":    
+        elif self.channel_type=="rayleigh":     
             no = sionna.phy.utils.ebnodb2no(ebno_db, self.num_bits_per_symbol, coderate=1)
             a, tau = self.rayleigh(batch_size=modulated_symbols.shape[0], num_time_steps=modulated_symbols.shape[1])  # 生成瑞利衰弱信道
             h = tf.squeeze(a, axis=[1, 2, 3, 4, 5])
             modulated_symbols = modulated_symbols * h  # 应用瑞利衰落信道
             modulated_symbols=my_channel(modulated_symbols,no)
-        if self.channel_type=="Rayleigh":
+        if self.channel_type=="rayleigh":
             modulated_symbols=modulated_symbols/h
         rec_bitstream=self.modulation.demodulation(modulated_symbols,no,pad_mod)
         rec_bitstream=self.fec.ldpc_decoder(rec_bitstream,pad_code)
@@ -103,9 +103,9 @@ class PhysicalLayer:
             no = sionna.phy.utils.ebnodb2no(ebno_db, self.num_bits_per_symbol, coderate=1)
             rx_symbols = tx_symbols
 
-            if self.channel_type == "AWGN":
+            if self.channel_type == "awgn":
                 rx_symbols = self.channel(tx_symbols, no)
-            elif self.channel_type == "Rayleigh":
+            elif self.channel_type == "rayleigh":
                 a, tau = self.rayleigh(batch_size=tf.shape(tx_symbols)[0],
                                     num_time_steps=tf.shape(tx_symbols)[1])
                 h = tf.squeeze(a, axis=[1, 2, 3, 4, 5])
@@ -132,9 +132,9 @@ class PhysicalLayer:
                 redundancy_shift = (retx * 8) % tf.shape(tx_symbols)[1]
                 tx_symbols_shifted = tf.roll(tx_symbols, shift=redundancy_shift, axis=1)
 
-                if self.channel_type == "AWGN":
+                if self.channel_type == "awgn":
                     rx_symbols_shifted = self.channel(tx_symbols_shifted, no)
-                elif self.channel_type == "Rayleigh":
+                elif self.channel_type == "rayleigh":
                     a, tau = self.rayleigh(batch_size=tf.shape(tx_symbols_shifted)[0],
                                         num_time_steps=tf.shape(tx_symbols_shifted)[1])
                     h = tf.squeeze(a, axis=[1, 2, 3, 4, 5])
@@ -166,7 +166,7 @@ class PhysicalLayer:
             success_mask = tf.tensor_scatter_nd_update(success_mask, tf.where(to_send_mask), valid)
 
         return rec_bits, success_mask
-TEMP_DIR='/home/data/haoyi_projects/vq_sc/Temp_img'
+TEMP_DIR='/home/data/haoyi_projects/vq_sc'
 def encode_bpg(img_path, quality=30, temp_dir=TEMP_DIR):
     img = Image.open(img_path).convert("RGB")
     crop_size = 256  
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     x=split_bit.tensor_to_bits(x)
     split_patch=split2patch(x.shape,x.dtype)
     x=split_patch.tensor_to_patch(x)
-    physical_layer=PhysicalLayer(num_bits_per_symbol=4,channel_type="AWGN")
+    physical_layer=PhysicalLayer(num_bits_per_symbol=4,channel_type="awgn")
     #rec_bitstream,valid=physical_layer.pass_channel(x,ebno_db=1)
     rec_bitstream,valid=physical_layer.harq_transmit(x,mode="TYPE-1",ebno_db=SNR - 10*math.log10(4))
     print(valid)
