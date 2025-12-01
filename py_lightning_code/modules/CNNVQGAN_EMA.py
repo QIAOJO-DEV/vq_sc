@@ -81,6 +81,7 @@ class VQVAE(nn.Module):
         dec = self.decode(quant_t, quant_b)
 
         return dec, diff
+
 class CNNVQGAN_EMA(pl.LightningModule):
     def __init__(self, image_key: str, image_size: int, model_param: OmegaConf, 
                  loss: OmegaConf, learning_rate:float=1e-4,epochs:int=500,path: Optional[str] = None) -> None:
@@ -184,12 +185,6 @@ class CNNVQGAN_EMA(pl.LightningModule):
             print("当前学习率为：",self.lr_schedulers()[1].get_last_lr())
         #ckpt_path = f"/home/data/haoyi_project/vq_sc/checkpoints/{self.current_epoch:02d}.ckpt"
         #self.trainer.save_checkpoint(ckpt_path)
-    def encode_for_experiment(self, x: torch.Tensor) -> torch.Tensor:
-        _, _, _, id_t, id_b = self.model.encode(x)
-        return id_t, id_b
-    def decode_for_experiment(self, id_t: torch.Tensor, id_b: torch.Tensor) -> torch.Tensor:
-        x_rec = self.model.decode_index(id_t, id_b)
-        return x_rec
     def log_images(self, batch: Tuple[Any, Any], *args, **kwargs) -> Dict:
         log = dict()
         x = self.get_input(batch, self.image_key).to(self.device)
@@ -198,3 +193,22 @@ class CNNVQGAN_EMA(pl.LightningModule):
         log["reconstructions"] = x_rec
         
         return log
+    def encode_for_experiment(self, x: torch.Tensor) -> torch.Tensor:
+        _, _, _, id_t, id_b = self.model.encode(x)
+        return id_t, id_b
+    def decode_for_experiment(self, id_t: torch.Tensor, id_b: torch.Tensor) -> torch.Tensor:
+        x_rec = self.model.decode_index(id_t, id_b)
+        return x_rec
+    def encode_analog(self, x):
+        enc_b = self.model.enc_b(x)              
+        enc_t = self.model.enc_t(enc_b)          
+        quant_t = self.model.quantize_conv_t(enc_t)  
+        dec_t = self.model.dec_t(quant_t) 
+        enc_b_cat = torch.cat([dec_t, enc_b], dim=1)
+        quant_b = self.model.quantize_conv_b(enc_b_cat)
+        return quant_t, quant_b
+    def decode_analog(self,quant_t, quant_b):
+        upsample_t = self.model.upsample_t(quant_t)
+        quant = torch.cat([upsample_t, quant_b], 1)
+        dec = self.model.dec(quant)
+        return dec

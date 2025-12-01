@@ -3,14 +3,14 @@ import torch.nn as nn
 import numpy as np
 
 
-class AnalogChannel(nn.Module):
+class analog_channel(nn.Module):
     """
     Currently the channel model is either error free,
     rayleigh channel or the AWGN channel.
     """
 
     def __init__(self, chan_type='awgn'):
-        super(AnalogChannel, self).__init__()
+        super(analog_channel, self).__init__()
         self.chan_type = chan_type
 
 
@@ -110,7 +110,7 @@ class AnalogChannel(nn.Module):
 # Example Usage
 # -------------------------
 if __name__ == "__main__":
-    channel = AnalogChannel(chan_type='awgn')
+    channel = analog_channel(chan_type='awgn')
     x = torch.randn(4, 16).to("cuda")  # ANY tensor on ANY device
     y = channel(x, chan_param=10)
     print(y.shape)

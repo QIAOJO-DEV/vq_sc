@@ -20,15 +20,26 @@ import subprocess
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 import lpips
+from py_lightning_code.utils.analog_physical_channel import analog_channel
+
+
 
 # =====================
 # 评估指标函数
 # =====================
 def compute_metrics(recon, target, perceptual_loss):
     psnr_val = psnr(target.cpu().numpy(), recon.cpu().numpy(), data_range=1.0)
-    ssim_val = ssim(target[0].permute(1,2,0).cpu().numpy(),
-                    recon[0].permute(1,2,0).cpu().numpy(),
-                    channel_axis=2, data_range=1.0)
+    ssim_vals = []
+    for i in range(target.shape[0]):
+        ssim_vals.append(
+            ssim(
+                target[i].permute(1,2,0).cpu().numpy(),
+                recon[i].permute(1,2,0).cpu().numpy(),
+                channel_axis=2,
+                data_range=1.0
+            )
+        )
+    ssim_val = sum(ssim_vals) / len(ssim_vals)
     lpips_val = perceptual_loss(recon*2-1, target*2-1).mean().item()
     return psnr_val, ssim_val, lpips_val
 
@@ -188,7 +199,27 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
         results["LPIPS"].append(np.mean(lpips_list))
 
     return results
+def evaluate_analog_vqvae(vqvae, dataloader, channel, SNR_list, device, perceptual_loss):
 
+    results = {"PSNR": [], "SSIM": [], "LPIPS": []}
+    bits_per_index = 8  # BPG 字节 = 8bit
+    for SNR in tqdm(SNR_list, desc="SNR loop"):
+        psnr_list, ssim_list, lpips_list = [], [], []
+        for batch in dataloader:
+            batch_img = batch['image'].to(device)
+            with torch.no_grad():
+                quant_t, quant_b = vqvae.encode_analog(batch_img)
+                quant_t = channel(quant_t, SNR)
+                quant_b = channel(quant_b, SNR)
+                recon = vqvae.decode_analog(quant_t, quant_b)
+                ps_val, ss_val, lp_val = compute_metrics(recon, batch_img, perceptual_loss)
+                psnr_list.append(ps_val)
+                ssim_list.append(ss_val)
+                lpips_list.append(lp_val)
+        results["PSNR"].append(np.mean(psnr_list))
+        results["SSIM"].append(np.mean(ssim_list))
+        results["LPIPS"].append(np.mean(lpips_list))
+    return results
 
 # =====================
 # 主函数
@@ -196,8 +227,9 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--SNR_list', type=list, default=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
-    parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--model_ckpts', type=list, default=['/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt','/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt'])
+    parser.add_argument('--batch_size', type=int, default=2)
+    parser.add_argument('--model_ckpts', type=list, default=['./checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt','/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt'])
+    parser.add_argument('--Transmission_Format',type=list,default=['analog','digital'])
     parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml','/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml'])
     parser.add_argument('--model_name', type=list, default=['VQ-reassign index','VQ'])
     parser.add_argument('--codebooks', type=list, default=['/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.pt',None])
@@ -206,12 +238,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
     save_dir = "/home/data/haoyi_projects/vq_sc/img_save"
     os.makedirs(save_dir, exist_ok=True)
-
-    device = torch.device('cpu')
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+    print("cuda available:",torch.cuda.is_available())
+    device = torch.device('cuda:0')
     dataset = ImageFileDataset(args.pic_dir)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
-
-    physical_layer = PhysicalLayer(num_bits_per_symbol=4)
+    analogchannel=analog_channel(chan_type='awgn')
+    physical_layer = PhysicalLayer(num_bits_per_symbol=4,channel_type="awgn")
     perceptual_loss = lpips.LPIPS(net='vgg', verbose=False).to(device)
 
     # =====================
@@ -222,8 +255,13 @@ if __name__ == "__main__":
         print(f"Processing model {idx}: {ckpt}")
         codebook = args.codebooks[idx] if args.codebooks is not None else None
         vqvae, bits_per_index = load_model_from_ckpt(ckpt, cfg, device, codebook)
-        results = evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, args.SNR_list, device, perceptual_loss)
+        if args.Transmission_Format[idx] == 'analog':
+            results = evaluate_analog_vqvae(vqvae, dataloader, analogchannel, args.SNR_list, device, perceptual_loss)
+        else:
+            results = evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, args.SNR_list, device, perceptual_loss)
         all_results[f"{model_name}"] = results
+        del vqvae
+        torch.cuda.empty_cache()
     print("Processing BPG baseline...")
     all_results["BPG"] = evaluate_bpg(dataloader, physical_layer, args.SNR_list, perceptual_loss, device, quality=args.bpg_quality)
 
@@ -231,14 +269,17 @@ if __name__ == "__main__":
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
     for metric in metrics:
-        plt.figure(figsize=(10,6))
+        plt.figure(figsize=(10,10))
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_linewidth(2)
         for idx, key in enumerate(all_results.keys()):
             plt.plot(args.SNR_list, all_results[key][metric], 'o-', label=key, color=colors[idx])
-        plt.xlabel("SNR (dB)")
-        plt.ylabel(metric)
-        plt.title(f"{metric} vs SNR for multiple checkpoints (with BPG)")
+        plt.xlabel("SNR (dB)",fontweight='bold',fontsize=20)
+        plt.ylabel(metric,fontweight='bold',fontsize=20)
+        plt.title(f"{metric} vs SNR",fontweight='bold',fontsize=20)
         plt.grid(True)
-        plt.legend()
+        plt.legend(prop={'size':15, 'weight':'bold'})
         plt.tight_layout()
         plt.savefig(os.path.join(save_dir, f"{metric}_vs_snr.png"))
         plt.show()
