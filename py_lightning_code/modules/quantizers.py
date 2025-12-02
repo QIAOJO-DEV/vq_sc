@@ -74,7 +74,7 @@ class BaseQuantizer(nn.Module):
 
 class VectorQuantizer(BaseQuantizer):
     def __init__(self, embed_dim: int, n_embed: int, error_strategy: str='top_k', error_prob:float=0.05,top_k:int=500,beta: float = 0.25, use_norm: bool = False,
-                 use_residual: bool = False, num_quantizers: Optional[int] = None,channel_loss_weight:float=0.01,**kwargs) -> None:
+                 use_residual: bool = False, num_quantizers: Optional[int] = None,channel_loss_weight:float=0.1,**kwargs) -> None:
         super().__init__(embed_dim, n_embed, True,
                          use_norm, use_residual, num_quantizers)
         n_bits=int(math.log2(self.n_embed))
@@ -163,7 +163,7 @@ class VectorQuantizer(BaseQuantizer):
             print("z_qnorm min/max:", z_qnorm.min(), z_qnorm.max())
             print("z norm min/max:", z_norm.min(), z_norm.max())
         return z_q, loss, encoding_indices
-    def quantize_to_top_k(self,z:torch.FloatTensor,k:int=1)->Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:#随机跳到K个最邻近索引中的某一个，稳定训练
+    def quantize_to_top_k(self,z:torch.FloatTensor,k:int=500)->Tuple[torch.FloatTensor, torch.FloatTensor, torch.LongTensor]:#随机跳到K个最邻近索引中的某一个，稳定训练
         #z=torch.clamp(z, -10.0, 10.0)
         #z=torch.tanh(z) * 15
         #z = z / (1 + 0.05* z.abs())

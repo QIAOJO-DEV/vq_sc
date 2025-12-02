@@ -30,12 +30,12 @@ class VQVAE(nn.Module):
         self.enc_b = Encoder(in_channel, channel, n_res_block, n_res_channel, stride=4)
         self.enc_t = Encoder(channel, channel, n_res_block, n_res_channel, stride=2)
         self.quantize_conv_t = nn.Conv2d(channel, embed_dim, 1)
-        self.quantize_t = VectorQuantizer(embed_dim, n_embed, error_strategy=error_strategy, error_prob=error_prob,decay=decay)
+        self.quantize_t = VectorQuantizer(embed_dim, n_embed, error_strategy=error_strategy, error_prob=error_prob,top_k=top_k,channel_loss_weight=channel_loss_weight)
         self.dec_t = Decoder(
             embed_dim, embed_dim, channel, n_res_block, n_res_channel, stride=2
         )
         self.quantize_conv_b = nn.Conv2d(embed_dim + channel, embed_dim, 1)
-        self.quantize_b = VectorQuantizer(embed_dim, n_embed, error_strategy=error_strategy, error_prob=error_prob,decay=decay)
+        self.quantize_b = VectorQuantizer(embed_dim, n_embed, error_strategy=error_strategy, error_prob=error_prob,top_k=top_k,channel_loss_weight=channel_loss_weight)
         self.upsample_t = nn.ConvTranspose2d(
             embed_dim, embed_dim, 4, stride=2, padding=1
         )
