@@ -11,10 +11,10 @@ from torchvision import transforms as T
 
 
 class ImageFileDataset(datasets.ImageFolder):
-    def __init__(self, root):
+    def __init__(self, root,size=256):
         self.transform = T.Compose([
             #T.Resize(256),
-            T.RandomCrop(256),
+            T.RandomCrop(size),
             T.RandomHorizontalFlip(),
             T.ToTensor(),
             #T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])#输入范围变为[-1,1]
