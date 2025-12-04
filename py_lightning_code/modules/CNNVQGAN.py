@@ -24,6 +24,7 @@ class VQVAE(nn.Module):
         error_strategy="top_k",
         error_prob=0.05,
         top_k=500,
+        channel_loss_weight=0.01,
     ):
         super().__init__()
 
