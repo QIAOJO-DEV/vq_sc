@@ -91,7 +91,7 @@ def neighbors_by_hamming(code_int, m, radius):
     neighbors = []
     bits_positions = list(range(m))
     for r in range(radius+1):
-        for comb in itertools.combinations(bits_positions, r):
+        for comb in itertools.combinations(bits_positions, r):#C_m^r
             new = code_int
             for pos in comb:
                 shift = m - 1 - pos
@@ -141,23 +141,20 @@ def local_unique_assignment(S, bits01, m, max_radius=2):
         candidate_set = set()
         while radius <= max_radius and len(candidate_set) < len(idxs):
             # expand neighbors
-            for idx in idxs:
-                neighs = neighbors_by_hamming(code, m, radius)
-                for nb in neighs:
-                    if nb in available:
-                        candidate_set.add(nb)
+            neighs = neighbors_by_hamming(code, m, radius)
+            for nb in neighs:
+                if nb in available:
+                    candidate_set.add(nb)
             if len(candidate_set) >= len(idxs):
                 break
             radius += 1
-
         if len(candidate_set) < len(idxs):
             # still not enough candidates: expand more for this group up to radius=m
             for r2 in range(max_radius+1, m+1):
-                for idx in idxs:
-                    neighs = neighbors_by_hamming(code, m, r2)
-                    for nb in neighs:
-                        if nb in available:
-                            candidate_set.add(nb)
+                neighs = neighbors_by_hamming(code, m, r2)
+                for nb in neighs:
+                    if nb in available:
+                        candidate_set.add(nb)
                 if len(candidate_set) >= len(idxs):
                     radius = r2
                     break
@@ -175,7 +172,7 @@ def local_unique_assignment(S, bits01, m, max_radius=2):
         p_norm2 = (points ** 2).sum(axis=1)[:, None]  # (g,1)
         c_norm2 = (cand_mat ** 2).sum(axis=1)[None, :]  # (1, k)
         dot = points.dot(cand_mat.T)  # (g, k)
-        costs = p_norm2 + c_norm2 - 2.0 * dot
+        costs = p_norm2 + c_norm2 - 2.0 * dot 
         # Solve assignment (Hungarian). If more candidates than points, just take first k cols? No: use hungarian on rectangular matrix.
         row_ind, col_ind = linear_sum_assignment(costs)
         # Note: linear_sum_assignment gives min cost matching of size = min(g,k) assigning each row to one col.
@@ -259,7 +256,6 @@ def reorder_codebook_by_index(codebook_tensor, ints_unique):
 
     ints_tensor = torch.from_numpy(ints_unique).long()  # 确保 PyTorch 索引类型
     new_codebook[ints_tensor] = codebook_tensor
-
     return new_codebook
 def reassign_index(codebook_tensor):
     n_codes = codebook_tensor.shape[0]
@@ -276,16 +272,14 @@ def reassign_index(codebook_tensor):
     new_loss = calculate_matrix_distance(new_codebook, bits)
     print("重新分配后的汉明矩阵和欧式距离矩阵的距离:", new_loss.item())
     return new_codebook
-
-
 # -----------------------
 # Example usage
 # -----------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ckpt_path', type=str, default='/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt')
-    parser.add_argument('--config_path', type=str, default='/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml')
-    parser.add_argument('--save_path', type=str, default='/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.pt')
+    parser.add_argument('--ckpt_path', type=str, default='/home/data/haoyi_projects/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss_small-epoch=1987.ckpt')
+    parser.add_argument('--config_path', type=str, default='/home/data/haoyi_projects/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss_small.yaml')
+    parser.add_argument('--save_path', type=str, default='/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500_channel_loss_small-epoch=1987.pt')
     args = parser.parse_args()
     ckpt_path = args.ckpt_path
     config_path = args.config_path

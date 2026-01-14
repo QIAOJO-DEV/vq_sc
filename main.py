@@ -22,7 +22,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--seed', type=int, default=0)
     parser.add_argument('-nn', '--num_nodes', type=int, default=1)
     parser.add_argument('-ac', '--accelerator', type=str, default="cuda")
-    parser.add_argument('-d', '-d', '--devices', type=int, nargs='+', default=[0,1])
+    parser.add_argument('-d', '-d', '--devices', type=int, nargs='+', default=[0])
     parser.add_argument('-u', '--update_every', type=int, default=1)
     #parser.add_argument('-e', '--epochs', type=int, default=500)epochs在配置文件中设置
     #parser.add_argument('-lr', '--base_lr', type=float, default=4.5e-6)学习率在配置文件中设置

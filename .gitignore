@@ -4,3 +4,10 @@ data_set/
 reassign_codebook/
 libbpg/
 img_save/
+Deep-JSCC-PyTorch/
+deep_jscc_data/
+experiments_data/
+visualize_code_book.py
+visualize_codebook_utilization.py
+visualize_pkl.py
+experiment_data/

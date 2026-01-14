@@ -21,20 +21,6 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 import lpips
 from py_lightning_code.utils.analog_physical_channel import analog_channel
-def py2tf(tensor: torch.Tensor) -> tf.Tensor:
-    """
-    将 Python 中的 torch.Tensor 转换为 TensorFlow 中的 tf.Tensor
-    """
-    dlpack = torch.utils.dlpack.to_dlpack(tensor)
-    tf_tensor = tf.experimental.dlpack.from_dlpack(dlpack)
-    return tf_tensor
-def tf2py(tensor: tf.Tensor) -> torch.Tensor:
-    """
-    将 TensorFlow 中的 tf.Tensor 转换为 Python 中的 torch.Tensor
-    """
-    dlpack = tf.experimental.dlpack.to_dlpack(tensor)
-    torch_tensor = torch.utils.dlpack.from_dlpack(dlpack)
-    return torch_tensor
 
 
 # =====================
@@ -77,7 +63,7 @@ def load_model_from_ckpt(ckpt_path, config_path, device, codebook_path=None):
 # =====================
 # 单个模型/方法 SNR 循环推理
 # =====================
-def evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, SNR_list, device, perceptual_loss):
+def evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, SNR_list, device, perceptual_loss,harq_type='none'):
     results = {"PSNR": [], "SSIM": [], "LPIPS": []}
 
     for SNR in tqdm(SNR_list, desc="SNR loop"):
@@ -101,8 +87,13 @@ def evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, SNR_list, 
                 id_b = split_patch_b.tensor_to_patch(id_b)
 
                 # 物理信道模拟
-                id_t, _ = physical_layer.pass_channel(id_t, ebno_db=SNR - 10*math.log10(4))
-                id_b, _ = physical_layer.pass_channel(id_b, ebno_db=SNR - 10*math.log10(4))
+                if harq_type == 'none':
+                    id_t, _ = physical_layer.pass_channel(id_t, ebno_db=SNR - 10*math.log10(4))
+                    id_b, _ = physical_layer.pass_channel(id_b, ebno_db=SNR - 10*math.log10(4))
+                else:
+                    #print("work on HARQ-mode")
+                    id_t, _ = physical_layer.harq_transmit(id_t,mode=harq_type,ebno_db=SNR - 10*math.log10(4))
+                    id_b, _ = physical_layer.harq_transmit(id_b,mode=harq_type,ebno_db=SNR - 10*math.log10(4))
 
                 # patch -> tensor -> bits -> tensor
                 id_t = split_patch_t.patch_to_tensor(id_t).to(device)
@@ -163,7 +154,7 @@ def decode_bpg_from_tensor(bpg_tensor, temp_dir="/tmp"):
     os.remove(temp_png)
     return img_tensor
 
-def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, quality=30):
+def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, quality=30,harq_type='none'):
     results = {"PSNR": [], "SSIM": [], "LPIPS": []}
     bits_per_index = 8  # BPG 字节 = 8bit
 
@@ -179,7 +170,6 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
 
                 try:
                     # BPG 编码
-
                     # bits -> patch
                     split_bit = split2bitstream(bits_per_index, bpg_tensor.shape, bpg_tensor.dtype)
                     bits = split_bit.tensor_to_bits(bpg_tensor)
@@ -187,7 +177,10 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
                     patch = split_patch.tensor_to_patch(bits)
 
                     # 信道模拟
-                    patch, _ = physical_layer.pass_channel(patch, ebno_db=SNR - 10*math.log10(4))
+                    if harq_type == 'none':
+                        patch, _ = physical_layer.pass_channel(patch, ebno_db=SNR - 10*math.log10(4))
+                    else:
+                        patch, _ = physical_layer.harq_transmit(patch,mode=harq_type,ebno_db=SNR - 10*math.log10(4))
 
                     # patch -> bits -> tensor
                     patch = split_patch.patch_to_tensor(patch)
@@ -200,6 +193,8 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
                     print(f"[Warning] BPG decode failed for {img_path} at SNR={SNR}: {e}")
                     # 用全零图像代替
                     recon = torch.zeros_like(batch_img[i]).unsqueeze(0)#扩充一个维度
+                if recon.shape != img_tensor.shape:
+                    recon = torch.zeros_like(img_tensor)
 
                 # 计算指标
                 ps_val, ss_val, lp_val = compute_metrics(recon, img_tensor, perceptual_loss)
@@ -212,91 +207,76 @@ def evaluate_bpg(dataloader, physical_layer, SNR_list, perceptual_loss, device, 
         results["LPIPS"].append(np.mean(lpips_list))
 
     return results
-def evaluate_analog_vqvae(vqvae, dataloader, channel, SNR_list, device, perceptual_loss):
-
-    results = {"PSNR": [], "SSIM": [], "LPIPS": []}
-    bits_per_index = 8  # BPG 字节 = 8bit
-    for SNR in tqdm(SNR_list, desc="SNR loop"):
-        psnr_list, ssim_list, lpips_list = [], [], []
-        for batch in dataloader:
-            batch_img = batch['image'].to(device)
-            with torch.no_grad():
-                quant_t, quant_b = vqvae.encode_analog(batch_img)
-                quant_t = channel(quant_t, SNR)
-                quant_b = channel(quant_b, SNR)
-                recon = vqvae.decode_analog(quant_t, quant_b)
-                ps_val, ss_val, lp_val = compute_metrics(recon, batch_img, perceptual_loss)
-                psnr_list.append(ps_val)
-                ssim_list.append(ss_val)
-                lpips_list.append(lp_val)
-        results["PSNR"].append(np.mean(psnr_list))
-        results["SSIM"].append(np.mean(ssim_list))
-        results["LPIPS"].append(np.mean(lpips_list))
-    return results
-
 # =====================
 # 主函数
 # =====================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--SNR_list', type=list, default=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
-    parser.add_argument('--batch_size', type=int, default=2)
-    parser.add_argument('--model_ckpts', type=list, default=['./checkpoints/low_space_wo_error-epoch=1497.ckpt','./checkpoints/low_space_wo_error-epoch=1497.ckpt','./checkpoints/low_space_top_500_0.01_channel_loss-epoch=1454.ckpt'])
-    parser.add_argument('--Transmission_Format',type=list,default=['digital','analog','digital'])
-    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_projects/vq_sc/config/low_space_wo_error.yaml','/home/data/haoyi_projects/vq_sc/config/low_space_wo_error.yaml','/home/data/haoyi_projects/vq_sc/config/low_space_top_500_0.01_channel_loss.yaml'])
-    parser.add_argument('--model_name', type=list, default=['VQ-DeepSC','Analog_JSCC','Our method'])
-    parser.add_argument('--codebooks', type=list, default=[None,None,'/home/data/haoyi_projects/vq_sc/reassign_codebook/low_space_top_500_0.01_channel_loss-epoch=1454.pt'])
-    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_projects/vq_sc/data_set/JNU_test')
-    parser.add_argument('--save_dir', type=str, default='/home/data/haoyi_projects/vq_sc/img_save')
+    parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--model_ckpts', type=list, default=['/home/data/haoyi_projects/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss_small-epoch=1987.ckpt','/home/data/haoyi_projects/vq_sc/checkpoints/cnn_w_error_0.01_top_500_channel_loss_small-epoch=1987.ckpt'])
+    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_projects/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss_small.yaml','/home/data/haoyi_projects/vq_sc/config/control_cnn_w_error_0.01_top_500_channel_loss_small.yaml'])
+    parser.add_argument('--model_name', type=list, default=['RDV-SC','RDV-SC after index assignment'])
+    parser.add_argument('--codebooks', type=list, default=[None,'/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_w_error_0.01_top_500_channel_loss_small-epoch=1987.pt'])
+    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_projects/vq_sc/data_set/kodak')
+    parser.add_argument('--save_dir', type=str, default='/home/data/haoyi_projects/vq_sc')
     parser.add_argument('--channel_type', type=str, default='awgn')
+    parser.add_argument('--harq_type', type=str, default='none')#只做CC的实验
     parser.add_argument('--bpg_quality', type=int, default=30)
     args = parser.parse_args()
     save_dir = args.save_dir
     channel_type = args.channel_type
+    harq_type = args.harq_type
     os.makedirs(save_dir, exist_ok=True)
     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
     print("cuda available:",torch.cuda.is_available())
-    device = torch.device('cuda:1')
+    device = torch.device('cuda:0')
     dataset = ImageFileDataset(args.pic_dir)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
-    analogchannel=analog_channel(chan_type=channel_type)
-    physical_layer = PhysicalLayer(num_bits_per_symbol=4,channel_type=channel_type)
+
+    # 调制方式对应线型
+    modulation_layers = {
+        '16QAM': PhysicalLayer(num_bits_per_symbol=4, channel_type=args.channel_type),
+        '64QAM': PhysicalLayer(num_bits_per_symbol=6, channel_type=args.channel_type)
+    }
+    line_styles = {
+        '16QAM': '-',
+        '64QAM': ':'
+    }
+
     perceptual_loss = lpips.LPIPS(net='vgg', verbose=False).to(device)
 
-    # =====================
-    # 循环多个 checkpoint
-    # =====================
     all_results = {}
+    colors = ['green','blue']
+
     for idx, (ckpt, cfg, model_name) in enumerate(zip(args.model_ckpts, args.config_files, args.model_name)):
         print(f"Processing model {idx}: {ckpt}")
         codebook = args.codebooks[idx] if args.codebooks is not None else None
         vqvae, bits_per_index = load_model_from_ckpt(ckpt, cfg, device, codebook)
-        if args.Transmission_Format[idx] == 'analog':
-            results = evaluate_analog_vqvae(vqvae, dataloader, analogchannel, args.SNR_list, device, perceptual_loss)
-        elif args.Transmission_Format[idx] == 'digital':
-            results = evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, args.SNR_list, device, perceptual_loss)
-        all_results[f"{model_name}"] = results
+
+        color = colors[idx % len(colors)]  # 同一个模型的三条线颜色相同
+
+        for mod_name, physical_layer in modulation_layers.items():
+            results = evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, args.SNR_list, device, perceptual_loss,harq_type=harq_type)
+            all_results[f"{model_name}_{mod_name}"] = {
+                'results': results,
+                'color': color,
+                'linestyle': line_styles[mod_name]
+            }
+
         del vqvae
         torch.cuda.empty_cache()
+
     print("Processing BPG baseline...")
-    all_results["BPG"] = evaluate_bpg(dataloader, physical_layer, args.SNR_list, perceptual_loss, device, quality=args.bpg_quality)
-
-    metrics = ['PSNR', 'SSIM', 'LPIPS']
-    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-
-    for metric in metrics:
-        plt.figure(figsize=(10,10))
-        ax = plt.gca()
-        for spine in ax.spines.values():
-            spine.set_linewidth(2)
-        for idx, key in enumerate(all_results.keys()):
-            plt.plot(args.SNR_list, all_results[key][metric], 'o-', label=key, color=colors[idx])
-        plt.xlabel("SNR (dB)",fontweight='bold',fontsize=20)
-        plt.ylabel(metric,fontweight='bold',fontsize=20)
-        plt.title(f"{metric} vs SNR",fontweight='bold',fontsize=20)
-        plt.grid(True)
-        plt.legend(prop={'size':15, 'weight':'bold'})
-        plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f"{metric}_vs_snr.png"))
-        plt.show()
-
+    bpg_color = 'red'  # BPG 用黑色，或者你也可以选择别的
+    for mod_name, physical_layer in modulation_layers.items():
+        results = evaluate_bpg(dataloader, physical_layer, args.SNR_list, perceptual_loss, device, quality=args.bpg_quality,harq_type=harq_type)
+        all_results[f"BPG_{mod_name}"] = {
+            'results': results,
+            'color': bpg_color,
+            'linestyle': line_styles[mod_name]
+        }
+    results_path ='./results.pkl'
+    with open(results_path, 'wb') as f:
+        pickle.dump(all_results, f)
+    print(f"Results saved to {results_path}")

@@ -38,7 +38,7 @@ class PhysicalLayer:
             self.channel_type=channel_type
         elif channel_type=="rayleigh":
             self.channel=sionna.phy.channel.AWGN()
-            self.rayleigh = RayleighBlockFading(num_rx=1, num_rx_ant=1, num_tx=1, num_tx_ant=1)
+            self.rayleigh = RayleighBlockFading(num_rx=1, num_rx_ant=1, num_tx=1, num_tx_ant=1)#SISO
             self.channel_type=channel_type
 
     def pass_channel(self,bitstream,ebno_db= 10):
@@ -111,7 +111,7 @@ class PhysicalLayer:
                 h = tf.squeeze(a, axis=[1, 2, 3, 4, 5])
                 rx_symbols = tx_symbols * h
                 rx_symbols = self.channel(rx_symbols, no)
-                rx_symbols = rx_symbols / h
+                rx_symbols = rx_symbols / h#完美信道估计
 
             # 5️⃣ HARQ 合并
             if mode == "TYPE-1":
