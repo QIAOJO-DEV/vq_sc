@@ -21,7 +21,20 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 import lpips
 from py_lightning_code.utils.analog_physical_channel import analog_channel
-
+def py2tf(tensor: torch.Tensor) -> tf.Tensor:
+    """
+    将 Python 中的 torch.Tensor 转换为 TensorFlow 中的 tf.Tensor
+    """
+    dlpack = torch.utils.dlpack.to_dlpack(tensor)
+    tf_tensor = tf.experimental.dlpack.from_dlpack(dlpack)
+    return tf_tensor
+def tf2py(tensor: tf.Tensor) -> torch.Tensor:
+    """
+    将 TensorFlow 中的 tf.Tensor 转换为 Python 中的 torch.Tensor
+    """
+    dlpack = tf.experimental.dlpack.to_dlpack(tensor)
+    torch_tensor = torch.utils.dlpack.from_dlpack(dlpack)
+    return torch_tensor
 
 
 # =====================
@@ -78,8 +91,8 @@ def evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, SNR_list, 
                 # bits 转换
                 split_bit_t = split2bitstream(bits_per_index, id_t.shape, id_t.dtype)
                 split_bit_b = split2bitstream(bits_per_index, id_b.shape, id_b.dtype)
-                id_t = split_bit_t.tensor_to_bits(id_t)
-                id_b = split_bit_b.tensor_to_bits(id_b)
+                id_t = split_bit_t.tensor_to_bits(id_t).to(device)
+                id_b = split_bit_b.tensor_to_bits(id_b).to(device)
 
                 # patch 分割
                 split_patch_t = split2patch(id_t.shape, id_t.dtype)
@@ -92,10 +105,10 @@ def evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, SNR_list, 
                 id_b, _ = physical_layer.pass_channel(id_b, ebno_db=SNR - 10*math.log10(4))
 
                 # patch -> tensor -> bits -> tensor
-                id_t = split_patch_t.patch_to_tensor(id_t)
-                id_b = split_patch_b.patch_to_tensor(id_b)
-                id_t = split_bit_t.bits_to_tensor(id_t)
-                id_b = split_bit_b.bits_to_tensor(id_b)
+                id_t = split_patch_t.patch_to_tensor(id_t).to(device)
+                id_b = split_patch_b.patch_to_tensor(id_b).to(device)
+                id_t = split_bit_t.bits_to_tensor(id_t).to(device)
+                id_b = split_bit_b.bits_to_tensor(id_b).to(device)
 
                 # 重构
                 recon = vqvae.decode_for_experiment(id_t, id_b).clamp(0,1)
@@ -228,23 +241,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--SNR_list', type=list, default=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
     parser.add_argument('--batch_size', type=int, default=2)
-    parser.add_argument('--model_ckpts', type=list, default=['./checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt','/home/data/haoyi_projects/vq_sc/checkpoints/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.ckpt'])
-    parser.add_argument('--Transmission_Format',type=list,default=['analog','digital'])
-    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml','/home/data/haoyi_projects/vq_sc/config/control_cnn_wo_error_EMA.yaml'])
-    parser.add_argument('--model_name', type=list, default=['VQ-reassign index','VQ'])
-    parser.add_argument('--codebooks', type=list, default=['/home/data/haoyi_projects/vq_sc/reassign_codebook/cnn_wo_error_EMA_GAN_lpips_big-epoch=2932.pt',None])
-    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_projects/vq_sc/data_set/kodak')
+    parser.add_argument('--model_ckpts', type=list, default=['./checkpoints/low_space_wo_error-epoch=1497.ckpt','./checkpoints/low_space_wo_error-epoch=1497.ckpt','./checkpoints/low_space_top_500_0.01_channel_loss-epoch=1454.ckpt'])
+    parser.add_argument('--Transmission_Format',type=list,default=['digital','analog','digital'])
+    parser.add_argument('--config_files', type=list, default=['/home/data/haoyi_projects/vq_sc/config/low_space_wo_error.yaml','/home/data/haoyi_projects/vq_sc/config/low_space_wo_error.yaml','/home/data/haoyi_projects/vq_sc/config/low_space_top_500_0.01_channel_loss.yaml'])
+    parser.add_argument('--model_name', type=list, default=['VQ-DeepSC','Analog_JSCC','Our method'])
+    parser.add_argument('--codebooks', type=list, default=[None,None,'/home/data/haoyi_projects/vq_sc/reassign_codebook/low_space_top_500_0.01_channel_loss-epoch=1454.pt'])
+    parser.add_argument('--pic_dir', type=str, default='/home/data/haoyi_projects/vq_sc/data_set/JNU_test')
+    parser.add_argument('--save_dir', type=str, default='/home/data/haoyi_projects/vq_sc/img_save')
+    parser.add_argument('--channel_type', type=str, default='awgn')
     parser.add_argument('--bpg_quality', type=int, default=30)
     args = parser.parse_args()
-    save_dir = "/home/data/haoyi_projects/vq_sc/img_save"
+    save_dir = args.save_dir
+    channel_type = args.channel_type
     os.makedirs(save_dir, exist_ok=True)
     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
     print("cuda available:",torch.cuda.is_available())
-    device = torch.device('cuda:0')
+    device = torch.device('cuda:1')
     dataset = ImageFileDataset(args.pic_dir)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
-    analogchannel=analog_channel(chan_type='awgn')
-    physical_layer = PhysicalLayer(num_bits_per_symbol=4,channel_type="awgn")
+    analogchannel=analog_channel(chan_type=channel_type)
+    physical_layer = PhysicalLayer(num_bits_per_symbol=4,channel_type=channel_type)
     perceptual_loss = lpips.LPIPS(net='vgg', verbose=False).to(device)
 
     # =====================
@@ -257,7 +273,7 @@ if __name__ == "__main__":
         vqvae, bits_per_index = load_model_from_ckpt(ckpt, cfg, device, codebook)
         if args.Transmission_Format[idx] == 'analog':
             results = evaluate_analog_vqvae(vqvae, dataloader, analogchannel, args.SNR_list, device, perceptual_loss)
-        else:
+        elif args.Transmission_Format[idx] == 'digital':
             results = evaluate_model(vqvae, dataloader, physical_layer, bits_per_index, args.SNR_list, device, perceptual_loss)
         all_results[f"{model_name}"] = results
         del vqvae
